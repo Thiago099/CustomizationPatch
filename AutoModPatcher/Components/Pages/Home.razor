@@ -1,0 +1,501 @@
+﻿@page "/"
+@using Application
+@using CustomizationPatch.Components.Component
+@using Domain
+@using System.Text
+@using Newtonsoft.Json
+@using System.Text.RegularExpressions
+@using Wrapper
+
+
+@rendermode InteractiveServer
+
+@inject IJSRuntime js;
+
+@code{
+    List<Page> Pages;
+    Dictionary<string, PageUserData> AllData;
+    Dictionary<string, PageUserData> OldData;
+    LoadingScreen loadingScreen;
+    MessageBox messageBox;
+    ulong inputKey = 0;
+    string SelectedTab = "";
+    protected override async Task OnInitializedAsync()
+    {
+
+        if(File.Exists("userdata.preferences.json"))
+        {
+            AllData = JsonConvert.DeserializeObject<Dictionary<string, PageUserData>>(File.ReadAllText("userdata.preferences.json")) ?? new();
+        }
+        else
+        {
+            AllData = new();
+        }
+
+        Pages = PagesService.GetPages();
+
+
+
+        SelectedTab = Pages[0].Id;
+
+        foreach(var page in Pages)
+        {
+
+            PageUserData? PageUserData = null;
+            AllData.TryGetValue(page.Id, out PageUserData);
+
+            var chosenPreset = PageUserData?.ChosenPreset ?? page.DefaultPreset;
+
+            if(PageUserData == null)
+            {
+                PageUserData = new() { ChosenPreset = chosenPreset, ChosenData = new() };
+                AllData[page.Id] = PageUserData;
+            }
+
+            if(PageUserData.ChosenPreset == null)
+            {
+                PageUserData.ChosenPreset = chosenPreset;
+            }
+
+            var preset = page.Presets.FirstOrDefault(x => x.Id == chosenPreset);
+
+            foreach (var group in page.Groups)
+            {
+                Dictionary<string, string>? groupData = null;
+
+                PageUserData.ChosenData.TryGetValue(group.Id, out groupData);
+
+                Dictionary<string, object>? groupPreset = null;
+                preset?.Data.TryGetValue(group.Id, out groupPreset);
+
+                if(groupData == null)
+                {
+                    groupData = new();
+                    PageUserData.ChosenData[group.Id] = groupData;
+                }
+
+                foreach (var item in group.Items)
+                {
+                    object? itemPreset = null;
+                    groupPreset?.TryGetValue(item.Id, out itemPreset);
+                    string? itemData = null;
+                    groupData.TryGetValue(item.Id, out itemData);
+                    if(itemData == null)
+                    {
+                        groupData[item.Id] = itemPreset?.ToString()??"";
+                    }
+                }    
+            }
+
+
+            cacheOldData();
+        }
+    }
+    void cacheOldData()
+    {
+        OldData = JsonConvert.DeserializeObject<Dictionary<string, PageUserData>>(JsonConvert.SerializeObject(AllData)) ?? throw new Exception("Inconssitent alldata variable");
+    }
+    string GetValue(Domain.Group groupScaffholding, Dictionary<string, string> groupData, GroupItem groupItem)
+    {
+        var expression = AST.Parse(groupItem.Value);
+        return AST.Resolve(groupScaffholding, groupData, expression, groupItem).ToString() ?? "undefined";
+    }
+    Action<ChangeEventArgs> OnPresetChange(Page page, PageUserData pageData)
+    {
+        return e =>
+        {
+            pageData.ChosenPreset = e.Value.ToString();
+            var preset = page.Presets.FirstOrDefault(x => x.Id == pageData.ChosenPreset);
+            if(preset != null)
+            {
+                foreach (var group in page.Groups)
+                {
+                    if (preset.Data.TryGetValue(group.Id, out var groupPreset))
+                    {
+                        var groupData = pageData.ChosenData[group.Id];
+                        foreach (var item in group.Items)
+                        {
+                            if (groupPreset.TryGetValue(item.Id, out var itemPreset))
+                            {
+                                groupData[item.Id] = itemPreset.ToString() ?? "";
+                            }
+                        }
+                    }
+                }
+            }
+        };
+    }
+    Action<MouseEventArgs> OnResetPreset(Page page, PageUserData pageData)
+    {
+        return e =>
+        {
+            var preset = page.Presets.FirstOrDefault(x => x.Id == pageData.ChosenPreset);
+            if (preset != null)
+            {
+                foreach (var group in page.Groups)
+                {
+                    if (preset.Data.TryGetValue(group.Id, out var groupPreset))
+                    {
+                        var groupData = pageData.ChosenData[group.Id];
+                        foreach (var item in group.Items)
+                        {
+                            if (groupPreset.TryGetValue(item.Id, out var itemPreset))
+                            {
+                                groupData[item.Id] = itemPreset.ToString() ?? "";
+                            }
+                        }
+                    }
+                }
+            }
+        };
+    }
+    public Action<ChangeEventArgs> DataModel(Dictionary<string, string> GroupData, GroupItem item)
+    {
+        return async x =>
+        {
+            var value = x.Value?.ToString()??"";
+            if(item.Type == "Int" || item.Type == "Float")
+            {
+                value = Regex.Replace(value, @"[^0-9,-]+", "");
+            }
+            if(item.Type == "Int")
+            {
+                value = Regex.Replace(value, @",.+", "");
+            }
+            if ((item.Type == "Int" || item.Type == "Float") && (item.Max != null || item.Min != null))
+            {
+                if (value == "") value = "0";
+                var temp = double.Parse(value);
+                if(item.Max != null)
+                {
+                    if (temp > item.Max) temp = (double)item.Max;
+                }
+                if (item.Min != null)
+                {
+                    if (temp < item.Min) temp = (double)item.Min;
+                }
+                value = temp.ToString();
+            }
+            GroupData[item.Id] = value;
+            inputKey++;
+            // await InvokeAsync(StateHasChanged);
+        };
+    }
+    void DoSave()
+    {
+        try
+        {
+            loadingScreen.Visible = true;
+
+            Synthesis.Build(AllData, Pages);
+
+            File.WriteAllText("userdata.preferences.json", JsonConvert.SerializeObject(AllData));
+            cacheOldData();
+        }
+        catch(Exception ex)
+        {
+            messageBox.Show("Failed to save", ex.Message, "fa-regular fa-circle-xmark red");
+        }
+        finally
+        {
+            loadingScreen.Visible = false;
+            Modification.Flush();
+        }
+    }
+    Action DoExport(Page page)
+    {
+        return () =>
+        {
+            try
+            {
+                loadingScreen.Visible = true;
+
+                Synthesis.BuildSingle(AllData, page);
+            }
+            catch(Exception ex)
+            {
+            messageBox.Show("Failed to export", ex.Message, "fa-regular fa-circle-xmark red");
+            }
+            finally
+            {
+                loadingScreen.Visible = false;
+                Modification.Flush();
+            }
+        };
+    }
+    bool advanced = false;
+}
+
+<MessageBox @ref=messageBox></MessageBox>
+
+<PageTitle>Customization Patch</PageTitle>
+<div class="top-bar">
+    <div class="title"><i class="fa-solid fa-bandage"></i> Customization Patch</div>
+    <div class="tools">
+        <div @onclick=@(()=>advanced=!advanced) class="button">@if (advanced) {<i class="fa-regular fa-circle-dot"></i>} else {<i class="fa-regular fa-circle"></i>}&nbsp;Advanced</div>
+        <div @onclick=DoSave class="button"><i class="fa-solid fa-floppy-disk"></i>&nbsp;Save</div>
+    </div>
+</div>
+
+<div class="center">
+<div class="container">
+
+@foreach (var page in Pages.OrderByDescending(x=>x.Priority))
+{
+    var pageData = AllData[page.Id];
+    var pageOldData = OldData[page.Id];
+    <div class="page">
+        <div class="page-title @(page.Visible?"page-title-active":"")" @onclick=@(() => page.Visible = !page.Visible)><i class="fa-solid fa-angle-@(page.Visible?"up":"down")"></i> @(page.Name)</div>
+        @if (page.Visible)
+        {
+            <div class="main-section">
+                <div style="width:100%;display:flex;flex-direction:row;">
+                        @if(page.Presets.Count > 1)
+                        {
+                            <div class="input-container">
+                            <label>Preset</label>
+                            <select value=@(pageData.ChosenPreset) @onchange=@(OnPresetChange(page, pageData))>
+                                @foreach (var group in page.Presets.GroupBy(x=>x.Group))
+                                {
+                                    var label = group.FirstOrDefault()?.Group;
+
+                                    if(label == "")
+                                    {
+                                        @foreach (var preset in group)
+                                        {
+                                            <option value=@preset.Id>@preset.Name @(preset.Id == page.DefaultPreset ? "(Default)" : "")</option>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <optgroup label=@(label)>
+                                            @foreach (var preset in group)
+                                            {
+                                                <option value=@preset.Id>@preset.Name @(preset.Id == page.DefaultPreset?"(Default)":"")</option>
+                                            }
+                                        </optgroup>
+                                    }
+
+                                }
+                            </select>
+                        </div>
+                        }
+                    <div class="input-container">
+                        <label>Reset to preset</label>
+                        <div class="input-button" @onclick=@(OnResetPreset(page, pageData))><i class="fa-solid fa-right-to-bracket"></i></div>
+                    </div>
+                    @if(advanced)
+                    {
+                        <div class="input-container">
+                            <label>Generate (@(page.Name) - Customization.esp)</label>
+                            <div class="input-button" @onclick=@(DoExport(page))><i class="fa-solid fa-right-to-bracket"></i></div>
+                        </div>
+                    }
+                </div>
+                @foreach (var group in page.Groups)
+                {
+                    var groupData = pageData.ChosenData[group.Id];
+                    var groupOldData = pageOldData.ChosenData[group.Id];
+                    <div class="card" style="width:calc(@((group.Size??6) * 100 / 12)% - 20px);">
+                    @if(group.Name != "Default")
+                    {
+                       <div class="card-title">@(group.Name)</div>
+                    }
+                    @foreach (var item in group.Items)
+                    {
+
+                        if(item.Advanced && !advanced) continue;
+
+                        if (item.Size == 0) continue;
+                        var inputId =Guid.NewGuid().ToString();
+                        <div class="input-container relative" style="width:calc(@((item.Size??6) * 100 / 12)% - 20px);">
+                            @if(double.TryParse(groupOldData[item.Id], out var doubleDefault) && double.TryParse(groupData[item.Id], out var doubleChosen))
+                            {
+                                var ratio = doubleChosen-doubleDefault;
+                                if(ratio != 0)
+                                {
+                                    <div class="change" style="color:@(ratio > 0 ? "green":"red")">@(ratio>0?"+":"")@(ratio)</div>
+                                }
+                            }
+
+                            <label for=@inputId>@(item.Name)</label>
+                            <input @key=@(item.Id+"-"+inputKey) class="@(groupOldData[item.Id] == groupData[item.Id]?"":"changed")" id=@inputId type="text" value=@(groupData[item.Id]) @onchange=@(DataModel(groupData, item)) />
+                            <i class="refresh-button fa-solid fa-arrows-rotate" @onclick=@(()=>groupData[item.Id] = groupOldData[item.Id])></i>
+                        </div>
+
+                    }
+                </div>
+            }
+        </div>
+        }
+</div>
+}
+</div>
+</div>
+<LoadingScreen @ref=loadingScreen></LoadingScreen>
+
+
+<style>
+.tools > *{
+    margin-left:10px;
+}
+.center{
+    display:flex;
+    justify-content:center;
+}
+.container{
+    width:100%;
+    max-width:1200px;
+}
+
+.input-button {
+    border: 1px solid #ccc;
+    padding: 5px;
+    text-align: center;
+    border-radius: 3px;
+    outline: none;
+    background-color: white;
+    cursor: pointer;
+}
+
+body {
+    margin: 0;
+}
+
+
+.title{
+    font-size:2em;
+}
+
+.top-bar {
+    margin-bottom: 20px;
+    padding:10px;
+    justify-content:space-between;
+    display:flex;
+    align-items:center;
+    background-color:#4B68B8;
+    color:white;
+}
+
+.page {
+    margin-bottom: 10px;
+}
+
+.hidden {
+    display: none !important;
+}
+
+.button {
+    border-radius: 10px;
+    padding: 10px;
+    border: 1px solid #ccc;
+    cursor: pointer;
+    display: inline-flex;
+}
+
+.page-title {
+    font-size: 2em;
+    font-weight: bold;
+    padding: 10px;
+    user-select: none;
+    cursor: pointer;
+    border-radius: 10px;
+    background-color: #4B68B8;
+    color:white;
+}
+
+.page-title-active {
+    border-radius: 10px 10px 0 0;
+}
+
+.tab-item:not(.tab-selected) {
+    cursor: pointer;
+}
+
+.tab-item.tab-selected {
+    background-color: white;
+}
+
+.refresh-button {
+    right: 10px;
+    top: 44px;
+    position: absolute;
+    cursor: pointer;
+}
+
+
+.relative {
+    position: relative;
+}
+
+.change {
+    position: absolute;
+    top: 43px;
+    left: 10px;
+}
+
+.main-title {
+    font-size: 2em;
+    text-transform: capitalize;
+}
+
+.main-section {
+    display: flex;
+    flex-wrap: wrap;
+    border: 1px solid #ccc;
+    border-radius: 0 0 10px 10px;
+    border-top: none;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+
+input, select {
+    border: 1px solid #ccc;
+    padding: 5px;
+    text-align: center;
+    border-radius: 3px;
+    outline: none;
+    background-color: white;
+}
+
+.card {
+    border: 1px solid #ccc;
+    padding: 10px;
+    border-radius: 5px;
+    width: calc(50% - 20px);
+    display: flex;
+    flex-wrap: wrap;
+    position: relative;
+    margin: 10px;
+    margin-top: 30px;
+}
+
+.input-container {
+    display: flex;
+    flex-direction: column;
+    width: calc(50% - 20px);
+    margin: 10px;
+}
+
+    .input-container label {
+        margin: 10px 0;
+    }
+
+.card-title {
+    text-transform: capitalize;
+    position: absolute;
+    top: -15px;
+    left: 30px;
+    font-size: 1.5em;
+    background-color:white;
+}
+
+.changed {
+    border-color: #008AD8;
+    background-color: #c7e9fc;
+}
+
+</style>

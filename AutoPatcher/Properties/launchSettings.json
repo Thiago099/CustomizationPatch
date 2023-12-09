@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "AutoPatcher": {
+      "commandName": "Project",
+      "workingDirectory": "E:\\www\\c#\\AutoModPatcher\\Data"
+    }
+  }
+}

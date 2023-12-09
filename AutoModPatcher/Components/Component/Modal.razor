@@ -1,0 +1,50 @@
+﻿
+@code {
+    static int zindex = 1000;
+    int myZindex = 1000;
+    bool display = false;
+
+    public void Close()
+    {
+        zindex--;
+        display = false;
+        InvokeAsync(StateHasChanged);
+    }
+    public void Show()
+    {
+        display = true;
+        zindex++;
+        myZindex = zindex;
+        InvokeAsync(StateHasChanged);
+    }
+    private string doDisplay => display ? "flex" : "none";
+    [Parameter]
+    public RenderFragment ChildContent { get; set; }
+    [Parameter]
+    public int? Width { get; set; }
+    [Parameter]
+    public int? Height { get; set; }
+    [Parameter]
+    public string Title { get; set; }
+}
+@if (display)
+{
+<div style="z-index:@myZindex;" class="dialog">
+    <div class="backdrop" @onclick=Close>
+    </div>
+    <div class="modal"  style="@(
+            (Width != null ? $"width:{Width}px;":"") + 
+            (Height != null ? $"height:{Height}px;":"")
+    )">
+        <div>
+            <div class="header">
+                <span class="close-button" autofocus @onclick="Close">X</span>
+                @Title
+            </div>
+            <div class="body">
+                @ChildContent
+            </div>
+        </div>
+    </div>
+</div>
+}

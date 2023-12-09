@@ -1,0 +1,31 @@
+﻿
+@code {
+    string _text;
+    string _title;
+    string? _icon;
+    Modal _modal;
+    public void Show(string title, string text, string icon = null)
+    {
+        _text = text;
+        _title = title;
+        _icon = icon;
+        InvokeAsync(StateHasChanged);
+        _modal.Show();
+    }
+}
+
+<Modal Title=@(_title) @ref=_modal>
+    <div class="message-box-container">
+    @if(_icon != null){<i class="display-icon @(_icon)"></i>}<span>@_text</span>
+    </div>
+</Modal>
+
+<style>
+    .message-box-container{
+        display:flex;
+        align-items:center;
+    }
+    .message-box-container > *{
+        padding:10px;
+    }
+</style>
