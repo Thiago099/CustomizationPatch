@@ -81,7 +81,14 @@ namespace Application
             {
                 foreach (var item in page.Files)
                 {
-                    File.Delete("../" + item.Value);
+                    if(item.Value.EndsWith(".ini"))
+                    {
+                        File.Delete("../" + item.Value.Replace("..",""));
+                    }
+                    else
+                    {
+                        throw new Exception($"Invalid file format on \"{item.Value}\", it must be a ini file");
+                    }
                 }
             }
             foreach (var group in page.Groups)
@@ -110,7 +117,10 @@ namespace Application
             {
                 if(page.Files != null && page.Files.TryGetValue((string)path[i], out string? file))
                 {
-                    File.AppendAllText("../" + file, value.ToString()+"\n");
+                    if (file.EndsWith(".ini"))
+                    {
+                        File.AppendAllText("../" + file, value.ToString().Replace("..", "") + "\n");
+                    }
                     return;
                 }
                 foreach (var plugin in loadOrder.PriorityOrder)
@@ -425,7 +435,7 @@ namespace Application
                     case "Description":
                         copy.Description = (string)value;
                         break;
-                    case "Effects":
+                    case "WordsOfPower":
                         WordsOfPower(copy.WordsOfPower, i + 1);
                         break;
                     case "Name":
@@ -450,7 +460,7 @@ namespace Application
 
                 switch (prop)
                 {
-                    case "Magnitude":
+                    case "RecoveryTime":
                         copy.RecoveryTime = float.Parse(value.ToString());
                         break;
                 }
@@ -469,7 +479,7 @@ namespace Application
                 var copy = patch.ConstructibleObjects.GetOrAddAsOverride(cur);
                 switch (prop)
                 {
-                    case "Effects":
+                    case "Items":
                         ConstructibleObjectsItem(copy.Items, i + 1);
                         break;
                 }
@@ -491,7 +501,7 @@ namespace Application
 
                 switch (prop)
                 {
-                    case "Magnitude":
+                    case "Count":
                         copy.Item.Count = int.Parse(value.ToString());
                         break;
                 }
@@ -540,10 +550,10 @@ namespace Application
 
                 switch (prop)
                 {
-                    case "Magnitude":
+                    case "Count":
                         copy.Count = short.Parse(value.ToString());
                         break;
-                    case "Area":
+                    case "Level":
                         copy.Level = short.Parse(value.ToString());
                         break;
                 }
