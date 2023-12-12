@@ -36,7 +36,7 @@
 
 
 
-        SelectedTab = Pages[0].Id;
+        SelectedTab = Pages.FirstOrDefault()?.Id ?? "";
 
         foreach(var page in Pages)
         {
