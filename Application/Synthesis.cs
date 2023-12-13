@@ -140,6 +140,7 @@ namespace Application
             bool FeatureSelection(int i)
             {
                 if (LeveledItem(i)) return true;
+                if (GlobalVariable(i)) return true;
                 if (MiscItem(i)) return true;
                 if (Book(i)) return true;
                 if (Ingredient(i)) return true;
@@ -172,6 +173,26 @@ namespace Application
                         break;
                     case "Entries":
                         Entry(copy.Entries, i + 1);
+                        break;
+                }
+                return true;
+
+            }
+            bool GlobalVariable(int i)
+            {
+                var element = (string)path[i];
+
+                var cur = chosenPlugin?.Globals.Records.FirstOrDefault(x => x.EditorID == element);
+
+                if (cur == null) return false;
+
+                var prop = (string)path[i + 1];
+
+                var copy = patch.Globals.GetOrAddAsOverride(cur);
+                switch (prop)
+                {
+                    case "Value":
+                        copy.RawFloat = float.Parse(value.ToString());
                         break;
                 }
                 return true;
