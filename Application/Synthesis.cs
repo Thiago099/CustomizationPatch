@@ -2,6 +2,7 @@
 using Mutagen.Bethesda;
 using Mutagen.Bethesda.Environments;
 using Mutagen.Bethesda.Plugins;
+using Mutagen.Bethesda.Plugins.Binary.Translations;
 using Mutagen.Bethesda.Plugins.Order;
 using Mutagen.Bethesda.Plugins.Records;
 using Mutagen.Bethesda.Skyrim;
@@ -13,6 +14,17 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Wrapper;
+
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
+using System.Linq;
+using Mutagen.Bethesda.Plugins.Cache;
+using Mutagen.Bethesda.Plugins.Cache.Internals;
+using Mutagen.Bethesda.Plugins.Exceptions;
+using static System.Runtime.InteropServices.JavaScript.JSType;
+
 
 namespace Application
 {
@@ -104,6 +116,70 @@ namespace Application
             }
         }
 
+
+        class ModificationResult<TGetter, TSetter>
+        where TGetter : class, ISkyrimMajorRecordGetter, IBinaryItem
+        where TSetter : class, ISkyrimMajorRecordInternal, IBinaryItem, IMajorRecordInternal, TGetter
+        {
+            public ISkyrimGroupGetter<TGetter> Getter { get; set; }
+            public SkyrimGroup<TSetter> Setter { get; set; }
+            public TGetter Item { get; set; }
+        }
+
+        static ModificationResult<TGetter, TSetter>? getData<TGetter, TSetter>(
+            ISkyrimModDisposableGetter chosenPlugin,
+            SkyrimMod patch,
+              Func<ISkyrimModDisposableGetter, ISkyrimGroupGetter<TGetter>> getGetter,
+              Func<SkyrimMod, SkyrimGroup<TSetter>> getSetter,
+              Func<ISkyrimGroupGetter<TGetter>, TGetter?> get
+          )
+              where TGetter : class, ISkyrimMajorRecordGetter, IBinaryItem
+              where TSetter : class, ISkyrimMajorRecordInternal, IBinaryItem, IMajorRecordInternal, TGetter
+        {
+            var result = new ModificationResult<TGetter, TSetter>();
+            result.Getter = getGetter(chosenPlugin);
+            var item = get(result.Getter);
+            if (item == null) return null;
+            result.Item = item;
+            result.Setter = getSetter(patch);
+            return result;
+        }
+        static void apply<TGetter, TSetter, TValue>(ModificationResult<TGetter, TSetter> input, object value,
+
+            Func<string, TValue> parse,
+            Func<TGetter, TValue> getValue,
+            Action<TSetter, TValue> set
+
+            )
+            where TGetter : class, ISkyrimMajorRecordGetter, IBinaryItem
+            where TSetter : class, ISkyrimMajorRecordInternal, IBinaryItem, IMajorRecordInternal, TGetter
+            where TValue : IEquatable<TValue>
+        {
+            var stringValue = value.ToString();
+            var parsedValue = parse(stringValue);
+            if (!getValue(input.Item).Equals(stringValue))
+            {
+                var newRecord = input.Setter.GetOrAddAsOverride(input.Item);
+                set(newRecord, parsedValue);
+            }
+        }
+
+        static void apply<TGetter, TSetter, TValue>(ModificationResult<TGetter, TSetter> input, object value,
+
+    Func<string, TValue> parse,
+    Action<TSetter, TValue> set
+
+    )
+    where TGetter : class, ISkyrimMajorRecordGetter, IBinaryItem
+    where TSetter : class, ISkyrimMajorRecordInternal, IBinaryItem, IMajorRecordInternal, TGetter
+    where TValue : IEquatable<TValue>
+        {
+            var stringValue = value.ToString();
+            var parsedValue = parse(stringValue);
+
+            var newRecord = input.Setter.GetOrAddAsOverride(input.Item);
+            set(newRecord, parsedValue);
+        }
         static void ApplyChanges(Page page, SkyrimMod patch, List<ASTNode> target, object value, string expression)
         {
             var path = AST.GetPath(target);
@@ -155,24 +231,40 @@ namespace Application
 
                 return false;
             }
+
+
+
+
+
+      
             bool LeveledItem(int i)
             {
                 var element = (string)path[i];
-
-                var cur = chosenPlugin?.LeveledItems.Records.FirstOrDefault(x=>x.EditorID == element);
-
-                if (cur == null) return false;
-
                 var prop = (string)path[i + 1];
 
-                var copy = patch.LeveledItems.GetOrAddAsOverride(cur);
+                var data = getData(
+                    chosenPlugin,
+                    patch,
+                    x => x.LeveledItems,
+                    x => x.LeveledItems,
+                    x => x.Records.FirstOrDefault(x => x.EditorID == element)
+                );
+
+                if (data == null) return false;
+
                 switch (prop)
                 {
                     case "ChanceNone":
-                        copy.ChanceNone = byte.Parse(value.ToString());
+                        apply(
+                            data,
+                            value,
+                                byte.Parse,
+                                x => x.ChanceNone,
+                            (x, y) => x.ChanceNone = y
+                        );
                         break;
                     case "Entries":
-                        Entry(copy.Entries, i + 1);
+                        Entry(data, i + 1);
                         break;
                 }
                 return true;
@@ -182,17 +274,27 @@ namespace Application
             {
                 var element = (string)path[i];
 
-                var cur = chosenPlugin?.Globals.Records.FirstOrDefault(x => x.EditorID == element);
+                var data = getData(
+                    chosenPlugin,
+                    patch,
+                    x => x.Globals,
+                    x => x.Globals,
+                    x => x.Records.FirstOrDefault(x => x.EditorID == element)
+                );
 
-                if (cur == null) return false;
+                if (data == null) return false;
 
                 var prop = (string)path[i + 1];
 
-                var copy = patch.Globals.GetOrAddAsOverride(cur);
                 switch (prop)
                 {
                     case "Value":
-                        copy.RawFloat = float.Parse(value.ToString());
+                        apply(
+                                data, 
+                                value,
+                                float.Parse,
+                            (x, y) => x.RawFloat= y
+                        );
                         break;
                 }
                 return true;
@@ -202,23 +304,47 @@ namespace Application
             {
                 var element = (string)path[i];
 
-                var cur = chosenPlugin?.MiscItems.Records.FirstOrDefault(x => x.EditorID == element);
+                var data = getData(
+                    chosenPlugin,
+                    patch,
+                    x => x.MiscItems,
+                    x => x.MiscItems,
+                    x => x.Records.FirstOrDefault(x => x.EditorID == element)
+                );
 
-                if (cur == null) return false;
+                if (data == null) return false;
+
 
                 var prop = (string)path[i + 1];
-
-                var copy = patch.MiscItems.GetOrAddAsOverride(cur);
                 switch (prop)
                 {
                     case "GoldValue":
-                        copy.Value = uint.Parse(value.ToString());
+
+                        apply(
+                            data,
+                            value,
+                                uint.Parse,
+                                x => x.Value,
+                            (x, y) => x.Value = y
+                        );
                         break;
                     case "Weight":
-                        copy.Weight = float.Parse(value.ToString());
+                        apply(
+                            data,
+                            value,
+                                float.Parse,
+                                x => x.Weight,
+                            (x, y) => x.Weight = y
+                        );
                         break;
                     case "Name":
-                        copy.Name = (string)value;
+                        apply(
+                            data,
+                            value,
+                                x=>x,
+                                x => x.Name?.ToString()??"",
+                            (x, y) => x.Name = y
+                        );
                         break;
                 }
                 return true;
@@ -230,23 +356,46 @@ namespace Application
             {
                 var element = (string)path[i];
 
-                var cur = chosenPlugin?.Keys.Records.FirstOrDefault(x => x.EditorID == element);
+                var data = getData(
+                    chosenPlugin,
+                    patch,
+                    x => x.Keys,
+                    x => x.Keys,
+                    x => x.Records.FirstOrDefault(x => x.EditorID == element)
+                );
 
-                if (cur == null) return false;
+                if (data == null) return false;
 
                 var prop = (string)path[i + 1];
 
-                var copy = patch.Keys.GetOrAddAsOverride(cur);
                 switch (prop)
                 {
                     case "GoldValue":
-                        copy.Value = uint.Parse(value.ToString());
+                        apply(
+                            data,
+                            value,
+                                uint.Parse,
+                                x => x.Value,
+                            (x, y) => x.Value = y
+                        );
                         break;
                     case "Weight":
-                        copy.Weight = float.Parse(value.ToString());
+                        apply(
+                            data,
+                            value,
+                                float.Parse,
+                                x => x.Weight,
+                            (x, y) => x.Weight = y
+                        );
                         break;
                     case "Name":
-                        copy.Name = (string)value;
+                        apply(
+                            data,
+                            value,
+                                x => x,
+                                x => x.Name?.ToString() ?? "",
+                            (x, y) => x.Name = y
+                        );
                         break;
                 }
                 return true;
@@ -256,29 +405,64 @@ namespace Application
             {
                 var element = (string)path[i];
 
-                var cur = chosenPlugin?.Books.Records.FirstOrDefault(x => x.EditorID == element);
+                var data = getData(
+                    chosenPlugin,
+                    patch,
+                    x => x.Books,
+                    x => x.Books,
+                    x => x.Records.FirstOrDefault(x => x.EditorID == element)
+                );
 
-                if (cur == null) return false;
+                if (data == null) return false;
 
                 var prop = (string)path[i + 1];
 
-                var copy = patch.Books.GetOrAddAsOverride(cur);
                 switch (prop)
                 {
                     case "GoldValue":
-                        copy.Value = uint.Parse(value.ToString());
+                        apply(
+                            data,
+                            value,
+                                uint.Parse,
+                                x => x.Value,
+                            (x, y) => x.Value = y
+                        );
                         break;
                     case "Weight":
-                        copy.Weight = float.Parse(value.ToString());
+                        apply(
+                            data,
+                            value,
+                                float.Parse,
+                                x => x.Weight,
+                            (x, y) => x.Weight = y
+                        );
                         break;
                     case "Name":
-                        copy.Name = (string)value;
+                        apply(
+                            data,
+                            value,
+                                x => x,
+                                x => x.Name?.ToString() ?? "",
+                            (x, y) => x.Name = y
+                        );
                         break;
                     case "BookText":
-                        copy.BookText = (string)value;
+                        apply(
+                            data,
+                            value,
+                                x => x,
+                                x => x.BookText?.ToString() ?? "",
+                            (x, y) => x.BookText = y
+                        );
                         break;
                     case "Description":
-                        copy.Description = (string)value;
+                        apply(
+                            data,
+                            value,
+                                x => x,
+                                x => x.Description?.ToString() ?? "",
+                            (x, y) => x.Description = y
+                        );
                         break;
                 }
                 return true;
@@ -288,26 +472,48 @@ namespace Application
             {
                 var element = (string)path[i];
 
-                var cur = chosenPlugin?.Ingredients.Records.FirstOrDefault(x => x.EditorID == element);
+                var data = getData(
+                    chosenPlugin,
+                    patch,
+                    x => x.Ingredients,
+                    x => x.Ingredients,
+                    x => x.Records.FirstOrDefault(x => x.EditorID == element)
+                );
 
-                if (cur == null) return false;
+                if (data == null) return false;
 
                 var prop = (string)path[i + 1];
-
-                var copy = patch.Ingredients.GetOrAddAsOverride(cur);
                 switch (prop)
                 {
                     case "GoldValue":
-                        copy.Value = uint.Parse(value.ToString());
+                        apply(
+                            data,
+                            value,
+                                uint.Parse,
+                                x => x.Value,
+                            (x, y) => x.Value = y
+                        );
                         break;
                     case "Weight":
-                        copy.Weight = float.Parse(value.ToString());
+                        apply(
+                            data,
+                            value,
+                                float.Parse,
+                                x => x.Weight,
+                            (x, y) => x.Weight = y
+                        );
                         break;
                     case "Name":
-                        copy.Name = (string)value;
+                        apply(
+                            data,
+                            value,
+                                x => x,
+                                x => x.Name?.ToString() ?? "",
+                            (x, y) => x.Name = y
+                        );
                         break;
                     case "Effects":
-                        Effect(copy.Effects, i + 1);
+                        EffectIngredient(data, i + 1);
                         break;
                 }
                 return true;
@@ -317,35 +523,82 @@ namespace Application
             {
                 var element = (string)path[i];
 
-                var cur = chosenPlugin?.Weapons.Records.FirstOrDefault(x => x.EditorID == element);
+                var data = getData(
+                    chosenPlugin,
+                    patch,
+                    x => x.Weapons,
+                    x => x.Weapons,
+                    x => x.Records.FirstOrDefault(x => x.EditorID == element)
+                );
 
-                if (cur == null) return false;
+                if (data == null) return false;
 
                 var prop = (string)path[i + 1];
 
-                var copy = patch.Weapons.GetOrAddAsOverride(cur);
                 switch (prop)
                 {
                     case "GoldValue":
-                        copy.BasicStats.Value = uint.Parse(value.ToString());
+                        apply(
+                            data,
+                            value,
+                                uint.Parse,
+                                x => x.BasicStats.Value,
+                            (x, y) => x.BasicStats.Value = y
+                        );
                         break;
                     case "Weight":
-                        copy.BasicStats.Weight = float.Parse(value.ToString());
-                        break;
-                    case "Damge":
-                        copy.BasicStats.Damage = ushort.Parse(value.ToString());
-                        break;
-                    case "Speed":
-                        copy.Data.Speed = ushort.Parse(value.ToString());
-                        break;
-                    case "Reach":
-                        copy.Data.Reach = ushort.Parse(value.ToString());
+                        apply(
+                            data,
+                            value,
+                                float.Parse,
+                                x => x.BasicStats.Weight,
+                            (x, y) => x.BasicStats.Weight = y
+                        );
                         break;
                     case "Name":
-                        copy.Name = (string)value;
+                        apply(
+                            data,
+                            value,
+                                x => x,
+                                x => x.Name?.ToString() ?? "",
+                            (x, y) => x.Name = y
+                        );
+                        break;
+                    case "Damge":
+                        apply(
+                            data,
+                            value,
+                                ushort.Parse,
+                                x => x.BasicStats.Damage,
+                            (x, y) => x.BasicStats.Damage = y
+                        );
+                        break;
+                    case "Speed":
+                        apply(
+                            data,
+                            value,
+                                float.Parse,
+                                x => x.Data.Speed,
+                            (x, y) => x.Data.Speed = y
+                        );
+                        break;
+                    case "Reach":
+                        apply(
+                            data,
+                            value,
+                                float.Parse,
+                                x => x.Data.Reach,
+                            (x, y) => x.Data.Reach = y
+                        );
                         break;
                     case "Description":
-                        copy.Description = (string)value;
+                        apply(
+                            data,
+                            value,
+                                x => x,
+                                x => x.Description?.ToString() ?? "",
+                            (x, y) => x.Description = y
+                        );
                         break;
                 }
                 return true;
@@ -355,29 +608,65 @@ namespace Application
             {
                 var element = (string)path[i];
 
-                var cur = chosenPlugin?.Ammunitions.Records.FirstOrDefault(x => x.EditorID == element);
 
-                if (cur == null) return false;
+                var data = getData(
+                    chosenPlugin,
+                    patch,
+                    x => x.Ammunitions,
+                    x => x.Ammunitions,
+                    x => x.Records.FirstOrDefault(x => x.EditorID == element)
+                );
+
+                if (data == null) return false;
 
                 var prop = (string)path[i + 1];
 
-                var copy = patch.Ammunitions.GetOrAddAsOverride(cur);
                 switch (prop)
                 {
                     case "GoldValue":
-                        copy.Value = uint.Parse(value.ToString());
+                        apply(
+                            data,
+                            value,
+                                uint.Parse,
+                                x => x.Value,
+                            (x, y) => x.Value = y
+                        );
                         break;
                     case "Weight":
-                        copy.Weight = float.Parse(value.ToString());
-                        break;
-                    case "Damge":
-                        copy.Damage = ushort.Parse(value.ToString());
+                        apply(
+                            data,
+                            value,
+                                float.Parse,
+                                x => x.Weight,
+                            (x, y) => x.Weight = y
+                        );
                         break;
                     case "Name":
-                        copy.Name = (string)value;
+                        apply(
+                            data,
+                            value,
+                                x => x,
+                                x => x.Name?.ToString() ?? "",
+                            (x, y) => x.Name = y
+                        );
+                        break;
+                    case "Damge":
+                        apply(
+                            data,
+                            value,
+                                float.Parse,
+                                x => x.Damage,
+                            (x, y) => x.Damage = y
+                        );
                         break;
                     case "Description":
-                        copy.Description = (string)value;
+                        apply(
+                            data,
+                            value,
+                                x => x,
+                                x => x.Description.ToString(),
+                            (x, y) => x.Description = y
+                        );
                         break;
                 }
                 return true;
@@ -387,30 +676,66 @@ namespace Application
             {
                 var element = (string)path[i];
 
-                var cur = chosenPlugin?.Armors.Records.FirstOrDefault(x => x.EditorID == element);
+                var data = getData(
+                    chosenPlugin,
+                    patch,
+                    x => x.Armors,
+                    x => x.Armors,
+                    x => x.Records.FirstOrDefault(x => x.EditorID == element)
+                );
 
-                if (cur == null) return false;
+                if (data == null) return false;
+
 
                 var prop = (string)path[i + 1];
 
-                var copy = patch.Armors.GetOrAddAsOverride(cur);
                 switch (prop)
                 {
                     case "GoldValue":
-                        copy.Value = uint.Parse(value.ToString());
+                        apply(
+                            data,
+                            value,
+                                uint.Parse,
+                                x => x.Value,
+                            (x, y) => x.Value = y
+                        );
                         break;
                     case "Weight":
-                        copy.Weight = float.Parse(value.ToString());
-                        break;
-                    case "ArmorRating":
-                        copy.ArmorRating = ushort.Parse(value.ToString());
+                        apply(
+                            data,
+                            value,
+                                float.Parse,
+                                x => x.Weight,
+                            (x, y) => x.Weight = y
+                        );
                         break;
                     case "Name":
-                        copy.Name = (string)value;
+                        apply(
+                            data,
+                            value,
+                                x => x,
+                                x => x.Name?.ToString() ?? "",
+                            (x, y) => x.Name = y
+                        );
+                        break;
+                    case "ArmorRating":
+                        apply(
+                            data,
+                            value,
+                                float.Parse,
+                                x => x.ArmorRating,
+                            (x, y) => x.ArmorRating = y
+                        );
                         break;
                     case "Description":
-                        copy.Description = (string)value;
-                        break;
+                        apply(
+                            data,
+                            value,
+                                x => x,
+                                x => x.Description?.ToString() ?? "",
+                            (x, y) => x.Description = y
+                        );
+                    break;
                 }
                 return true;
 
@@ -419,23 +744,42 @@ namespace Application
             {
                 var element = (string)path[i];
 
-                var cur = chosenPlugin?.Spells.Records.FirstOrDefault(x => x.EditorID == element);
 
-                if (cur == null) return false;
+                var data = getData(
+                    chosenPlugin,
+                    patch,
+                    x => x.Spells,
+                    x => x.Spells,
+                    x => x.Records.FirstOrDefault(x => x.EditorID == element)
+                );
+
+                if (data == null) return false;
+
 
                 var prop = (string)path[i + 1];
 
-                var copy = patch.Spells.GetOrAddAsOverride(cur);
                 switch (prop)
                 {
                     case "Description":
-                        copy.Description = (string)value;
+                        apply(
+                            data,
+                            value,
+                                x => x,
+                                x => x.Description?.ToString() ?? "",
+                            (x, y) => x.Description = y
+                        );
                         break;
                     case "Effects":
-                        Effect(copy.Effects, i + 1);
+                        EffectSpell(data, i + 1);
                         break;
                     case "Name":
-                        copy.Name = (string)value;
+                        apply(
+                            data,
+                            value,
+                                x => x,
+                                x => x.Name?.ToString() ?? "",
+                            (x, y) => x.Name = y
+                        );
                         break;
                 }
                 return true;
@@ -444,45 +788,66 @@ namespace Application
             {
                 var element = (string)path[i];
 
-                var cur = chosenPlugin?.Shouts.Records.FirstOrDefault(x => x.EditorID == element);
+                var data = getData(
+                    chosenPlugin,
+                    patch,
+                    x => x.Shouts,
+                    x => x.Shouts,
+                    x => x.Records.FirstOrDefault(x => x.EditorID == element)
+                );
 
-                if (cur == null) return false;
+                if (data == null) return false;
+
 
                 var prop = (string)path[i + 1];
 
-                var copy = patch.Shouts.GetOrAddAsOverride(cur);
                 switch (prop)
                 {
                     case "Description":
-                        copy.Description = (string)value;
+                        apply(
+                            data,
+                            value,
+                                x => x,
+                                x => x.Description?.ToString() ?? "",
+                            (x, y) => x.Description = y
+                        );
                         break;
                     case "WordsOfPower":
-                        WordsOfPower(copy.WordsOfPower, i + 1);
+                        WordsOfPower(data, i + 1);
                         break;
                     case "Name":
-                        copy.Name = (string)value;
+                        apply(
+                            data,
+                            value,
+                                x => x,
+                                x => x.Name?.ToString() ?? "",
+                            (x, y) => x.Name = y
+                        );
                         break;
                 }
                 return true;
             }
-            void WordsOfPower(ExtendedList<ShoutWord> Words, int i)
+            void WordsOfPower(ModificationResult<IShoutGetter, Mutagen.Bethesda.Skyrim.Shout> data, int i)
             {
                 var id = (int)path[i + 1];
                 var prop = (string)path[i + 2];
 
-                if (id >= Words.Count)
+                if (id >= data.Item.WordsOfPower.Count)
                 {
                     throw new Exception($"Index \"{id}\" is outside of \"{path[i]}\" bounds in expression \"{expression}\"");
                 }
 
-                var copy = Words[id];
-
-                if (copy == null) return;
 
                 switch (prop)
                 {
                     case "RecoveryTime":
-                        copy.RecoveryTime = float.Parse(value.ToString());
+                        apply(
+                            data,
+                            value,
+                            float.Parse,
+                            x => x.WordsOfPower[id].RecoveryTime,
+                            (x, y) => x.WordsOfPower[id].RecoveryTime = y
+                        );
                         break;
                 }
             }
@@ -491,91 +856,166 @@ namespace Application
             {
                 var element = (string)path[i];
 
-                var cur = chosenPlugin?.ConstructibleObjects.Records.FirstOrDefault(x => x.EditorID == element);
+                var data = getData(
+                    chosenPlugin,
+                    patch,
+                    x => x.ConstructibleObjects,
+                    x => x.ConstructibleObjects,
+                    x => x.Records.FirstOrDefault(x => x.EditorID == element)
+                );
 
-                if (cur == null) return false;
+                if (data == null) return false;
 
                 var prop = (string)path[i + 1];
 
-                var copy = patch.ConstructibleObjects.GetOrAddAsOverride(cur);
                 switch (prop)
                 {
                     case "Items":
-                        ConstructibleObjectsItem(copy.Items, i + 1);
+                        ConstructibleObjectsItem(data, i + 1);
                         break;
                 }
                 return true;
             }
-            void ConstructibleObjectsItem(ExtendedList<ContainerEntry> Items, int i)
+            void ConstructibleObjectsItem(ModificationResult<IConstructibleObjectGetter, ConstructibleObject> data, int i)
             {
                 var id = (int)path[i + 1];
                 var prop = (string)path[i + 2];
 
-                if (id >= Items.Count)
+                if (data.Item.Items == null || id >= data.Item.Items.Count)
                 {
                     throw new Exception($"Index \"{id}\" is outside of \"{path[i]}\" bounds in expression \"{expression}\"");
                 }
 
-                var copy = Items[id];
+                var copy = data.Item.Items[id];
 
                 if (copy == null) return;
 
                 switch (prop)
                 {
                     case "Count":
-                        copy.Item.Count = int.Parse(value.ToString());
+                        apply(
+                            data,
+                            value,
+                            float.Parse,
+                            x => x.Items[id].Item.Count,
+                            (x, y) => x.Items[id].Item.Count = y
+                        );
                         break;
                 }
             }
 
-            void Effect(ExtendedList<Mutagen.Bethesda.Skyrim.Effect> Effects, int i)
+            void EffectIngredient(ModificationResult<IIngredientGetter, Ingredient> data, int i)
             {
                 var id = (int)path[i+1];
                 var prop = (string)path[i + 2];
 
-                if (id >= Effects.Count)
+                if (id >= data.Item.Effects.Count)
                 {
                     throw new Exception($"Index \"{id}\" is outside of \"{path[i]}\" bounds in expression \"{expression}\"");
                 }
-
-                var copy = Effects[id].Data;
-
-                if (copy == null) return;
 
                 switch (prop)
                 {
                     case "Magnitude":
-                        copy.Magnitude = float.Parse(value.ToString());
+                        apply(
+                            data,
+                            value,
+                            float.Parse,
+                            x => x.Effects[id].Data.Magnitude,
+                            (x, y) => x.Effects[id].Data.Magnitude = y
+                        );
                         break;
                     case "Area":
-                        copy.Area = int.Parse(value.ToString());
+                        apply(
+                            data,
+                            value,
+                            int.Parse,
+                            x => x.Effects[id].Data.Area,
+                            (x, y) => x.Effects[id].Data.Area = y
+                        );
                         break;
                     case "Duration":
-                        copy.Duration = int.Parse(value.ToString());
+                        apply(
+                            data,
+                            value,
+                            int.Parse,
+                            x => x.Effects[id].Data.Duration,
+                            (x, y) => x.Effects[id].Data.Duration = y
+                        );
                         break;
                 }
             }
-            void Entry(ExtendedList<Mutagen.Bethesda.Skyrim.LeveledItemEntry> Entries, int i)
+            void EffectSpell(ModificationResult<ISpellGetter, Mutagen.Bethesda.Skyrim.Spell> data, int i)
             {
                 var id = (int)path[i + 1];
                 var prop = (string)path[i + 2];
 
-                if (id >= Entries.Count)
+                if (id >= data.Item.Effects.Count)
                 {
                     throw new Exception($"Index \"{id}\" is outside of \"{path[i]}\" bounds in expression \"{expression}\"");
                 }
 
-                var copy = Entries[id].Data;
+                switch (prop)
+                {
+                    case "Magnitude":
+                        apply(
+                            data,
+                            value,
+                            float.Parse,
+                            x => x.Effects[id].Data.Magnitude,
+                            (x, y) => x.Effects[id].Data.Magnitude = y
+                        );
+                        break;
+                    case "Area":
+                        apply(
+                            data,
+                            value,
+                            int.Parse,
+                            x => x.Effects[id].Data.Area,
+                            (x, y) => x.Effects[id].Data.Area = y
+                        );
+                        break;
+                    case "Duration":
+                        apply(
+                            data,
+                            value,
+                            int.Parse,
+                            x => x.Effects[id].Data.Duration,
+                            (x, y) => x.Effects[id].Data.Duration = y
+                        );
+                        break;
+                }
+            }
+            void Entry(ModificationResult<ILeveledItemGetter, LeveledItem> data, int i)
+            {
+                var id = (int)path[i + 1];
+                var prop = (string)path[i + 2];
 
-                if (copy == null) return;
+                if (data.Item.Entries == null || id >= data.Item.Entries.Count)
+                {
+                    throw new Exception($"Index \"{id}\" is outside of \"{path[i]}\" bounds in expression \"{expression}\"");
+                }
+
 
                 switch (prop)
                 {
                     case "Count":
-                        copy.Count = short.Parse(value.ToString());
+                        apply(
+                            data, 
+                            value,
+                            short.Parse, 
+                            x => x.Entries[id].Data.Count, 
+                            (x, y) => x.Entries[id].Data.Count = y
+                        );
                         break;
                     case "Level":
-                        copy.Level = short.Parse(value.ToString());
+                        apply(
+                            data, 
+                            value,
+                            short.Parse, 
+                            x => x.Entries[id].Data.Level, 
+                            (x, y) => x.Entries[id].Data.Level = y
+                        );
                         break;
                 }
             }
@@ -583,13 +1023,18 @@ namespace Application
             {
                 var element = (string)path[i];
 
-                var cur = chosenPlugin?.FormLists.Records.FirstOrDefault(x => x.EditorID == element);
 
-                if (cur == null) return false;
+                var data = getData(
+                    chosenPlugin,
+                    patch,
+                    x => x.FormLists,
+                    x => x.FormLists,
+                    x => x.Records.FirstOrDefault(x => x.EditorID == element)
+                );
+
+                if (data == null) return false;
 
                 var prop = (string)path[i + 1];
-
-                var copy = patch.FormLists.GetOrAddAsOverride(cur);
                 switch (prop)
                 {
                     case "Items":
@@ -598,17 +1043,17 @@ namespace Application
                 }
                 return true;
             }
-            void FormListsItem(ExtendedList<IFormLinkGetter<ISkyrimMajorRecordGetter>> Items, int i)
+            void FormListsItem(ModificationResult<IFormListGetter, FormList> data, int i)
             {
                 var id = (int)path[i + 1];
                 var prop = (string)path[i + 2];
 
-                if(id >= Items.Count)
+                if(data.Item == null || id >= data.Item.Items.Count)
                 {
                     throw new Exception($"Index \"{id}\" is outside of \"{path[i]}\" bounds in expression \"{expression}\"");
                 }
 
-                var copy = Items[id];
+                var copy = data.Item.Items[id];
 
 
                 if (copy == null) return;
@@ -621,7 +1066,7 @@ namespace Application
                         var count = int.Parse(value.ToString());
                         if (count > 1)
                         {
-                            Items.Remove(copy);
+                            data.Setter.Remove(copy.FormKey);
                             string itemId = name+"-alias-";
                             for (int j = 0; j < count; j++)
                             {
@@ -635,7 +1080,7 @@ namespace Application
                                     itemListPlaceholder.Items.Add(copy);
                                     createdAlias[current] = itemListPlaceholder;
                                 }
-                                Items.Add(itemListPlaceholder);
+                                data.Setter.Add(itemListPlaceholder);
                             }
                         }
                         break;
