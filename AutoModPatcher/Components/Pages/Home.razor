@@ -40,7 +40,7 @@
 
         foreach(var page in Pages)
         {
-
+            if (page.Error != null) continue;
             PageUserData? PageUserData = null;
             AllData.TryGetValue(page.Id, out PageUserData);
 
@@ -242,10 +242,21 @@
 
 @foreach (var page in Pages.OrderByDescending(x=>x.Priority))
 {
-    var pageData = AllData[page.Id];
-    var pageOldData = OldData[page.Id];
-    <div class="page">
-        <div class="page-title @(page.Visible?"page-title-active":"")" @onclick=@(() => page.Visible = !page.Visible)><i class="fa-solid fa-angle-@(page.Visible?"up":"down")"></i> @(page.Name)</div>
+
+        <div class="page">
+        <div class="page-title @((page.Visible||page.Error != null)?"page-title-active":"")" @onclick=@(() => page.Visible = !page.Visible)>@if(page.Error == null){<i class="fa-solid fa-angle-@(page.Visible?"up":"down")"></i>}&nbsp;@(page.Name)</div>
+        
+        @if(page.Error != null)
+        {
+            <div class="main-section" style="padding:10px;">
+            <i class="fa-regular fa-circle-xmark red"></i>&nbsp;@(page.Error);
+            </div>
+        }
+        else
+        {
+        var pageData = AllData[page.Id];
+        var pageOldData = OldData[page.Id];
+                    
         @if (page.Visible)
         {
             <div class="main-section">
@@ -297,6 +308,11 @@
                     var groupData = pageData.ChosenData[group.Id];
                     var groupOldData = pageOldData.ChosenData[group.Id];
                     <div class="card" style="width:calc(@((group.Size??6) * 100 / 12)% - 20px);">
+                    @if(group.Image != null)
+                    {
+                        <div class="card-bg-container"><img src="./images/@(group.Image)" class="card-bg" /></div>
+                    }
+                    
                     @if(group.Name != "Default")
                     {
                        <div class="card-title">@(group.Name)</div>
@@ -328,6 +344,7 @@
             }
         </div>
         }
+                }
 </div>
 }
 </div>
@@ -471,7 +488,26 @@ input, select {
     position: relative;
     margin: 10px;
     margin-top: 30px;
+    position:relative;
+
 }
+.card-bg-container{
+        width: 100%;
+        height: 100%;
+    overflow:hidden;
+    left: 0;
+    top: 0;
+    position: absolute;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+
+}
+    .card-bg {
+        width: 100%;
+        opacity:0.3;
+    }
+
 
 .input-container {
     display: flex;
@@ -487,15 +523,20 @@ input, select {
 .card-title {
     text-transform: capitalize;
     position: absolute;
-    top: -15px;
+    top: -20px;
     left: 30px;
     font-size: 1.5em;
-    background-color:white;
+    background-color: white;
+        padding: 5px 30px;
+    border-radius:10px;
+    border:1px solid #ccc;
 }
 
 .changed {
     border-color: #008AD8;
     background-color: #c7e9fc;
 }
+
+
 
 </style>

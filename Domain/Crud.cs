@@ -10,6 +10,7 @@ namespace Domain
     public class Page
     {
         public string Name { get; set; }
+        public string? Error { get; set; }
         public string Id { get => Regex.Replace(Name, @"\s+", ""); }
         public string? Image { get; set; }
         public double? Priority { get; set; }

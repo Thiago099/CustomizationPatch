@@ -16,9 +16,13 @@ namespace Application
                 try
                 {
                     var page = JsonConvert.DeserializeObject<Page>(File.ReadAllText(path));
+                    page.Error = null;
                     result.Add(page);
                 }
-                catch { }
+                catch(Exception ex){
+                    var page = new Page() { Error = ex.Message, Name = Path.GetFileName(path)};
+                    result.Add(page);
+                }
             }
 
             return result;
