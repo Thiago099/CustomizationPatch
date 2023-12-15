@@ -208,6 +208,10 @@ namespace Application
                 }
                 return true;
             }
+            if(node is ParenthesizedExpressionSyntax parenthesizedExpression)
+            {
+                ExtractPathElements(parenthesizedExpression.Expression, pathElements);
+            }
             if (node is BinaryExpressionSyntax binaryExpression)
             {
                 ExtractPathElements(binaryExpression.Left, pathElements);
