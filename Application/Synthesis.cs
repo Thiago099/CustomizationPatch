@@ -24,6 +24,7 @@ using Mutagen.Bethesda.Plugins.Cache;
 using Mutagen.Bethesda.Plugins.Cache.Internals;
 using Mutagen.Bethesda.Plugins.Exceptions;
 using static System.Runtime.InteropServices.JavaScript.JSType;
+using System.Text.RegularExpressions;
 
 
 namespace Application
@@ -57,12 +58,19 @@ namespace Application
                 end();
                 Modification.Save(patch, "All.customisation-patch.esp");
 
+                var appdata = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)+ "/Skyrim Special Edition/";
+                var str = File.ReadAllText(appdata + "Plugins.txt");
+                str = Regex.Replace(str, @"\*{0,1}All\.customisation-patch\.esp\n{0,1}", "");
+                str += "\n*All.customisation-patch.esp\n";
+                str = Regex.Replace(str, @"\n+", "\n");
+                File.WriteAllText(appdata + "Plugins.txt", str);
             }
             catch
             {
                 end();
                 throw;
             }
+            createdAlias = new();
         }
 
         public static void BuildSingle(Dictionary<string, PageUserData> AllData, Page page)
@@ -83,6 +91,7 @@ namespace Application
                 end();
                 throw;
             }
+            createdAlias = new();
         }
 
 
@@ -157,7 +166,7 @@ namespace Application
         {
             var stringValue = value.ToString();
             var parsedValue = parse(stringValue);
-            if (!getValue(input.Item).Equals(stringValue))
+            if (!getValue(input.Item).Equals(parsedValue))
             {
                 var newRecord = input.Setter.GetOrAddAsOverride(input.Item);
                 set(newRecord, parsedValue);
@@ -180,6 +189,13 @@ namespace Application
             var newRecord = input.Setter.GetOrAddAsOverride(input.Item);
             set(newRecord, parsedValue);
         }
+        static TSetter replace<TGetter, TSetter>(ModificationResult<TGetter, TSetter> input)
+where TGetter : class, ISkyrimMajorRecordGetter, IBinaryItem
+where TSetter : class, ISkyrimMajorRecordInternal, IBinaryItem, IMajorRecordInternal, TGetter
+        {
+            return input.Setter.GetOrAddAsOverride(input.Item);
+        }
+
         static void ApplyChanges(Page page, SkyrimMod patch, List<ASTNode> target, object value, string expression)
         {
             var path = AST.GetPath(target);
@@ -686,7 +702,6 @@ namespace Application
 
                 if (data == null) return false;
 
-
                 var prop = (string)path[i + 1];
 
                 switch (prop)
@@ -896,7 +911,7 @@ namespace Application
                         apply(
                             data,
                             value,
-                            float.Parse,
+                            int.Parse,
                             x => x.Items[id].Item.Count,
                             (x, y) => x.Items[id].Item.Count = y
                         );
@@ -1038,7 +1053,7 @@ namespace Application
                 switch (prop)
                 {
                     case "Items":
-                        FormListsItem(copy.Items, i + 1);
+                        FormListsItem(data, i + 1);
                         break;
                 }
                 return true;
@@ -1053,7 +1068,8 @@ namespace Application
                     throw new Exception($"Index \"{id}\" is outside of \"{path[i]}\" bounds in expression \"{expression}\"");
                 }
 
-                var copy = data.Item.Items[id];
+                var repl = replace(data);
+                var copy = repl.Items[id];
 
 
                 if (copy == null) return;
@@ -1064,23 +1080,21 @@ namespace Application
                 {
                     case "Repeat":
                         var count = int.Parse(value.ToString());
+                        repl.Items.Remove(copy);
                         if (count > 1)
                         {
-                            data.Setter.Remove(copy.FormKey);
-                            string itemId = name+"-alias-";
+                            string itemId = name + "-";
                             for (int j = 0; j < count; j++)
                             {
                                 var current = itemId + (j + 1);
-
-
                                 FormList? itemListPlaceholder;
                                 if (!createdAlias.TryGetValue(current, out itemListPlaceholder))
                                 {
-                                    itemListPlaceholder = patch.FormLists.AddNew(current);
+                                    itemListPlaceholder = patch.FormLists.AddNew(Guid.NewGuid().ToString());
                                     itemListPlaceholder.Items.Add(copy);
                                     createdAlias[current] = itemListPlaceholder;
                                 }
-                                data.Setter.Add(itemListPlaceholder);
+                                repl.Items.Add(itemListPlaceholder);
                             }
                         }
                         break;
