@@ -48,7 +48,7 @@ namespace Application
             init();
             try
             {
-                var patch = Modification.Patch("All.customisation-patch.esp");
+                var patch = Modification.Patch("All.customization-patch.esp");
 
                 patch.ModHeader.Flags = SkyrimModHeader.HeaderFlag.LightMaster;
 
@@ -56,12 +56,12 @@ namespace Application
                     BuildPage(AllData, page, patch);
                 }
                 end();
-                Modification.Save(patch, "All.customisation-patch.esp");
+                Modification.Save(patch, "All.customization-patch.esp");
 
                 var appdata = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)+ "/Skyrim Special Edition/";
                 var str = File.ReadAllText(appdata + "Plugins.txt");
-                str = Regex.Replace(str, @"\*{0,1}All\.customisation-patch\.esp\n{0,1}", "");
-                str += "\n*All.customisation-patch.esp\n";
+                str = Regex.Replace(str, @"\*{0,1}All\.customization-patch\.esp\n{0,1}", "");
+                str += "\n*All.customization-patch.esp\n";
                 str = Regex.Replace(str, @"\n+", "\n");
                 File.WriteAllText(appdata + "Plugins.txt", str);
             }
@@ -78,13 +78,13 @@ namespace Application
             init();
             try
             {
-                var patch = Modification.Patch(page.Name + ".customisation-patch.esp");
+                var patch = Modification.Patch(page.Name + ".customization-patch.esp");
                 patch.ModHeader.Flags = SkyrimModHeader.HeaderFlag.LightMaster;
 
                 BuildPage(AllData, page, patch);
 
                 end();
-                Modification.Save(patch, page.Name + ".customisation-patch.esp");
+                Modification.Save(patch, page.Name + ".customization-patch.esp");
             }
             catch
             {
@@ -217,7 +217,7 @@ where TSetter : class, ISkyrimMajorRecordInternal, IBinaryItem, IMajorRecordInte
                 }
                 foreach (var plugin in loadOrder.PriorityOrder)
                 {
-                    if(plugin.FileName.EndsWith(".customisation-patch.esp") || !plugin.ExistsOnDisk || !plugin.Enabled)
+                    if(plugin.FileName.EndsWith(".customization-patch.esp") || !plugin.ExistsOnDisk || !plugin.Enabled)
                     {
                         continue;
                     }
